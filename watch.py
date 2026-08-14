@@ -290,11 +290,11 @@ def build_mail(items, config, note=None, seeding=False):
 # --------------------------------------------------------------------------
 
 def prune(seen, stamp):
-    cutoff = stamp - datetime.timedelta(days=FORGET_AFTER_DAYS)
+    cutoff = (stamp - datetime.timedelta(days=FORGET_AFTER_DAYS)).date()
     kept = {}
     for key, value in seen.items():
         try:
-            when = datetime.datetime.fromisoformat(value)
+            when = datetime.date.fromisoformat(str(value)[:10])
         except (TypeError, ValueError):
             continue
         if when >= cutoff:
@@ -422,15 +422,26 @@ def main():
     if unresolved:
         print("%d Wohnungen bleiben fuer den naechsten Lauf offen." % len(unresolved))
 
+    # Nur auf den Tag genau vermerken: Der Workflow schreibt die Datei nach
+    # jedem Lauf ins Repository zurueck, und ein sekundengenauer Zeitstempel
+    # wuerde sie alle fuenf Minuten aendern - knapp 300 Commits taeglich, nur
+    # weil die Uhr weitergelaufen ist. Fuer das Vergessen nach 90 Tagen genuegt
+    # das Datum, und die Datei aendert sich jetzt nur noch, wenn sich der
+    # Wohnungsbestand tatsaechlich bewegt hat.
+    heute = stamp.date().isoformat()
     marked = dict(seen)
     for item_id in item_ids:
         if item_id in unresolved:
             continue
-        marked[str(item_id)] = stamp.isoformat()
+        marked[str(item_id)] = heute
     state["seen"] = prune(marked, stamp)
-    state["last_run"] = stamp.isoformat()
-    state["result_count"] = len(item_ids)
-    save_json(STATE_PATH, state)
+    state.pop("last_run", None)
+    state.pop("result_count", None)
+    if state != load_json(STATE_PATH, None):
+        save_json(STATE_PATH, state)
+        print("Zustand aktualisiert.")
+    else:
+        print("Zustand unveraendert.")
     return 0
 
 
