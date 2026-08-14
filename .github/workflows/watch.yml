@@ -1,0 +1,57 @@
+name: Wohnungs-Watcher
+
+on:
+  schedule:
+    # Alle 5 Minuten. GitHub haelt diesen Takt nicht garantiert ein -
+    # unter Last werden geplante Laeufe verzoegert oder uebersprungen.
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+# Nie zwei Laeufe gleichzeitig: sonst wuerden beide dieselben Wohnungen
+# als neu melden und sich beim Zurueckschreiben des Zustands ins Gehege kommen.
+concurrency:
+  group: wohnungs-watcher
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Auf neue Wohnungen pruefen
+        env:
+          FINDER_Q: ${{ secrets.FINDER_Q }}
+          SMTP_HOST: ${{ secrets.SMTP_HOST }}
+          SMTP_PORT: ${{ secrets.SMTP_PORT }}
+          SMTP_USER: ${{ secrets.SMTP_USER }}
+          SMTP_PASS: ${{ secrets.SMTP_PASS }}
+          MAIL_FROM: ${{ secrets.MAIL_FROM }}
+          MAIL_TO: ${{ secrets.MAIL_TO }}
+        run: python3 watch.py
+
+      - name: Zustand sichern
+        run: |
+          if git diff --quiet -- state/seen.json; then
+            echo "Keine Aenderung am Zustand."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add state/seen.json
+          git commit -m "Zustand: $(date -u '+%Y-%m-%d %H:%M UTC')"
+          # Bei parallelen Laeufen kann der Push veralten - einmal nachziehen.
+          for attempt in 1 2 3; do
+            if git push; then exit 0; fi
+            git pull --rebase --autostash
+          done
+          echo "Zustand konnte nicht gesichert werden." >&2
+          exit 1

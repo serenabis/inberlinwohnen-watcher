@@ -1,0 +1,5 @@
+{
+ "_hinweis": "Der Suchfilter gehoert NICHT in diese Datei, wenn das Repository oeffentlich ist. Er wird ueber die Umgebungsvariable FINDER_Q gesetzt: lokal in der Datei .env, bei GitHub als Secret. Nur als Rueckfallebene fuer rein lokalen Betrieb kann er hier stehen.",
+ "_woher": "Auf inberlinwohnen.de die Suchkriterien im Wohnungsfinder einstellen, den Link aus der Adresszeile kopieren und alles hinter '?q=' verwenden (das abschliessende %3D gehoert dazu).",
+ "q": ""
+}
