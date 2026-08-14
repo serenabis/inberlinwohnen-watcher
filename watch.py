@@ -79,12 +79,27 @@ def load_env_file():
         os.environ.setdefault(key.strip(), value.strip())
 
 
+def env(name, default=None):
+    """Umgebungsvariable lesen und Leerstrings wie 'nicht gesetzt' behandeln.
+
+    Noetig wegen GitHub Actions: Dort wird `${{ secrets.X }}` auch dann in die
+    Umgebung geschrieben, wenn das Secret gar nicht existiert - eben als leerer
+    Text. Ein schlichtes os.environ.get(name, "587") liefert dann "" statt der
+    Vorgabe, und der Lauf scheitert an einer Stelle, die mit der eigentlichen
+    Ursache nichts zu tun hat.
+    """
+    wert = os.environ.get(name)
+    if wert is None or not wert.strip():
+        return default
+    return wert.strip()
+
+
 def smtp_settings():
     load_env_file()
     missing = [
         name
         for name in ("SMTP_HOST", "SMTP_USER", "SMTP_PASS", "MAIL_TO")
-        if not os.environ.get(name)
+        if not env(name)
     ]
     if missing:
         raise SystemExit(
@@ -92,25 +107,34 @@ def smtp_settings():
             "Lokal per Umgebungsvariablen setzen, in GitHub Actions als Secrets."
             % ", ".join(missing)
         )
-    port = int(os.environ.get("SMTP_PORT", "587"))
+    roher_port = env("SMTP_PORT", "587")
+    try:
+        port = int(roher_port)
+    except ValueError:
+        raise SystemExit(
+            "SMTP_PORT ist keine Zahl: %r\n"
+            "Ueblich sind 587 (STARTTLS) oder 465 (durchgehend verschluesselt)."
+            % roher_port
+        )
+
     # Port 587 spricht Klartext und schaltet per STARTTLS auf TLS um, Port 465
     # ist von Anfang an verschluesselt. SMTP_SSL erlaubt es, das bei
     # abweichenden Ports selbst festzulegen.
-    implicit_tls = os.environ.get("SMTP_SSL")
-    if implicit_tls is None:
+    ssl_wahl = env("SMTP_SSL")
+    if ssl_wahl is None:
         implicit_tls = port == 465
     else:
-        implicit_tls = implicit_tls.strip().lower() in ("1", "true", "yes", "ja")
+        implicit_tls = ssl_wahl.lower() in ("1", "true", "yes", "ja")
 
     return {
-        "host": os.environ["SMTP_HOST"],
+        "host": env("SMTP_HOST"),
         "port": port,
         "implicit_tls": implicit_tls,
-        "user": os.environ["SMTP_USER"],
+        "user": env("SMTP_USER"),
         "password": os.environ["SMTP_PASS"],
-        "sender": os.environ.get("MAIL_FROM") or os.environ["SMTP_USER"],
+        "sender": env("MAIL_FROM") or env("SMTP_USER"),
         "recipients": [
-            a.strip() for a in os.environ["MAIL_TO"].split(",") if a.strip()
+            a.strip() for a in env("MAIL_TO", "").split(",") if a.strip()
         ],
     }
 
@@ -409,7 +433,7 @@ def main():
     # Der Suchfilter gehoert niemandem ausser dir: er kommt aus der Umgebung
     # (lokal aus .env, bei GitHub aus dem Secret FINDER_Q), damit er nicht im
     # Repository steht. config.json dient nur noch als Rueckfallebene.
-    search_q = os.environ.get("FINDER_Q") or config.get("q")
+    search_q = env("FINDER_Q") or config.get("q")
     if not search_q:
         print("Warnung: kein Suchfilter gesetzt (FINDER_Q) - es wird "
               "ungefiltert geprueft.", file=sys.stderr)
