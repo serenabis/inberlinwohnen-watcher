@@ -6,6 +6,11 @@ on:
     # unter Last werden geplante Laeufe verzoegert oder uebersprungen.
     - cron: "*/5 * * * *"
   workflow_dispatch:
+    inputs:
+      testmail:
+        description: "Nur eine Testmail verschicken (prueft den Versand)"
+        type: boolean
+        default: false
 
 # Nie zwei Laeufe gleichzeitig: sonst wuerden beide dieselben Wohnungen
 # als neu melden und sich beim Zurueckschreiben des Zustands ins Gehege kommen.
@@ -21,11 +26,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
+      # Kein setup-python noetig: Auf den Ubuntu-Runnern ist Python 3 bereits
+      # installiert, und der Watcher kommt ohne Zusatzbibliotheken aus. Das
+      # spart bei ~288 Laeufen taeglich spuerbar Zeit.
+      - name: Python-Version anzeigen
+        run: python3 --version
 
       - name: Auf neue Wohnungen pruefen
         env:
@@ -36,9 +43,15 @@ jobs:
           SMTP_PASS: ${{ secrets.SMTP_PASS }}
           MAIL_FROM: ${{ secrets.MAIL_FROM }}
           MAIL_TO: ${{ secrets.MAIL_TO }}
-        run: python3 watch.py
+        run: |
+          if [ "${{ inputs.testmail }}" = "true" ]; then
+            python3 watch.py --test-mail
+          else
+            python3 watch.py
+          fi
 
       - name: Zustand sichern
+        if: ${{ inputs.testmail != true }}
         run: |
           if git diff --quiet -- state/seen.json; then
             echo "Keine Aenderung am Zustand."
