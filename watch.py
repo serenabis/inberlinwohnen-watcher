@@ -115,6 +115,61 @@ def smtp_settings():
     }
 
 
+def send_or_explain(subject, text_body, html_body=None):
+    """Verschicken und im Fehlerfall erklaeren, aber den Fehler durchreichen.
+
+    Das Durchreichen ist wichtig: Nur so bricht der Lauf ab, bevor die
+    Wohnungen als gemeldet vermerkt werden - sonst waeren sie verloren.
+    """
+    try:
+        return send_mail(subject, text_body, html_body)
+    except Exception as fehler:  # noqa: BLE001 - wird erklaert und neu geworfen
+        print(diagnose(fehler), file=sys.stderr)
+        raise
+
+
+def diagnose(fehler):
+    """Aus einer SMTP-Ausnahme eine verstaendliche Erklaerung machen.
+
+    Laeuft vor allem in GitHub Actions: Dort liest niemand gern einen Traceback,
+    und der haeufigste Fall - der Mailserver laesst den Versand aus fremden
+    Netzen nicht zu - sieht einem falschen Passwort zum Verwechseln aehnlich.
+    """
+    host = os.environ.get("SMTP_HOST", "(unbekannt)")
+    text = str(fehler)
+    kopf = "MAILVERSAND FEHLGESCHLAGEN (%s)" % host
+    strich = "=" * len(kopf)
+
+    if isinstance(fehler, smtplib.SMTPAuthenticationError):
+        grund = (
+            "Der Server hat die Anmeldung abgelehnt.\n\n"
+            "Da derselbe Zugang lokal funktioniert hat, ist die wahrscheinlichste\n"
+            "Ursache: Dieser Mailserver erlaubt den Versand nur aus dem eigenen\n"
+            "Netz - und GitHub laeuft in einem Rechenzentrum.\n\n"
+            "Zweite Moeglichkeit: In den Secrets steckt ein Tippfehler.\n"
+            "Pruefe SMTP_USER und SMTP_PASS, danach hilft nur ein Wechsel des\n"
+            "Absenders (z. B. web.de oder GMX)."
+        )
+    elif isinstance(fehler, smtplib.SMTPSenderRefused):
+        grund = (
+            "Der Server akzeptiert die Absenderadresse nicht.\n"
+            "MAIL_FROM muss meist zum Anmeldenamen passen."
+        )
+    elif isinstance(fehler, smtplib.SMTPRecipientsRefused):
+        grund = "Der Server hat die Empfaengeradresse abgelehnt (MAIL_TO pruefen)."
+    elif isinstance(fehler, (smtplib.SMTPConnectError, TimeoutError, OSError)):
+        grund = (
+            "Es kam keine Verbindung zustande.\n\n"
+            "Moeglich: Der Server blockt Verbindungen aus Rechenzentren, oder\n"
+            "SMTP_HOST bzw. SMTP_PORT stimmen nicht."
+        )
+    else:
+        grund = "Unerwarteter Fehler."
+
+    return "\n%s\n%s\n\n%s\n\nTechnische Meldung: %s\n" % (
+        kopf, strich, grund, text)
+
+
 def send_mail(subject, text_body, html_body=None):
     cfg = smtp_settings()
     message = EmailMessage()
@@ -336,12 +391,16 @@ def main():
     args = parser.parse_args()
 
     if args.test_mail:
-        to = send_mail(
-            "Wohnungs-Watcher: Testmail",
-            "Wenn du das liest, funktioniert der Mailversand.",
-            '<p style="font-family:sans-serif;">Wenn du das liest, funktioniert '
-            "der Mailversand.</p>",
-        )
+        try:
+            to = send_mail(
+                "Wohnungs-Watcher: Testmail",
+                "Wenn du das liest, funktioniert der Mailversand.",
+                '<p style="font-family:sans-serif;">Wenn du das liest, funktioniert '
+                "der Mailversand.</p>",
+            )
+        except Exception as fehler:  # noqa: BLE001 - Ursache wird uebersetzt
+            print(diagnose(fehler), file=sys.stderr)
+            return 1
         print("Testmail verschickt an: %s" % ", ".join(to))
         return 0
 
@@ -396,7 +455,7 @@ def main():
         # Beim ersten Lauf nicht den kompletten Bestand mailen.
         if new_items and not args.dry_run:
             subject, text, html_body = build_mail(new_items, config, note, seeding=True)
-            to = send_mail(subject, text, html_body)
+            to = send_or_explain(subject, text, html_body)
             print("Startmail verschickt an: %s" % ", ".join(to))
         elif args.dry_run:
             print("[dry-run] Startmail mit %d Wohnungen im Bestand" % len(item_ids))
@@ -405,7 +464,7 @@ def main():
         if args.dry_run:
             print("[dry-run] Mail: %s\n\n%s" % (subject, text))
         else:
-            to = send_mail(subject, text, html_body)
+            to = send_or_explain(subject, text, html_body)
             print("Mail verschickt an: %s" % ", ".join(to))
     elif new_ids:
         print("Warnung: %d neue IDs ohne Details - werden erst spaeter gemeldet."
