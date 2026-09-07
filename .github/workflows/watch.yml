@@ -2,9 +2,11 @@ name: Wohnungs-Watcher
 
 on:
   schedule:
-    # Alle 5 Minuten. GitHub haelt diesen Takt nicht garantiert ein -
-    # unter Last werden geplante Laeufe verzoegert oder uebersprungen.
-    - cron: "*/5 * * * *"
+    # Alle 30 Minuten einen Job starten, der dann 28 Minuten lang selbst im
+    # Minutentakt nachschaut. GitHub haelt geplante Startzeiten nicht ein -
+    # unter Last vergehen 10 bis 30 Minuten. Nicht der Cron bestimmt also die
+    # Reaktionszeit, sondern die Schleife im Job.
+    - cron: "*/30 * * * *"
   workflow_dispatch:
     inputs:
       testmail:
@@ -14,6 +16,8 @@ on:
 
 # Nie zwei Laeufe gleichzeitig: sonst wuerden beide dieselben Wohnungen
 # als neu melden und sich beim Zurueckschreiben des Zustands ins Gehege kommen.
+# Der laufende Job hat Vorrang - ein verspaetet gestarteter Cron-Lauf wartet
+# also nicht in der Schlange, sondern faellt weg, sobald ohnehin geprueft wird.
 concurrency:
   group: wohnungs-watcher
   cancel-in-progress: false
@@ -24,7 +28,10 @@ permissions:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # Etwas mehr als die 28 Minuten Schleife, damit der Job selbst aussteigt
+    # und nicht von GitHub abgeschnitten wird - sonst bliebe der Zustand
+    # ungesichert.
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v5
 
@@ -47,7 +54,7 @@ jobs:
           if [ "${{ inputs.testmail }}" = "true" ]; then
             python3 watch.py --test-mail
           else
-            python3 watch.py
+            python3 watch.py --dauer 1680
           fi
 
       - name: Zustand sichern

@@ -127,6 +127,33 @@ Sollte der Token einmal ungültig werden, schaltet der Watcher automatisch auf
 lokale Filterung nach denselben Kriterien um (Bezirk, Ortsteil, Zimmerzahl,
 Kaltmiete — `FALLBACK_*` in `finder.py`) und weist in der Mail darauf hin.
 
+## Wie schnell der Watcher reagiert
+
+Die Inserate erscheinen bei inberlinwohnen.de im Minutentakt (ein Import legt
+sie jeweils in den Sekunden 2 bis 8 einer Minute an), praktisch aber nur
+werktags zwischen 8 und 20 Uhr — von 129 ausgewerteten Zeitstempeln lagen zwei
+am Wochenende.
+
+Der Engpass war nie die Website, sondern GitHub: `cron` ist eine Bitte, keine
+Zusage. Geplante Läufe werden unter Last 10 bis 30 Minuten verzögert oder
+ganz übersprungen.
+
+Deshalb startet der Cron jetzt nur noch **alle 30 Minuten** einen Job, und
+dieser Job prüft **28 Minuten lang selbst weiter** (`watch.py --dauer 1680`):
+
+* werktags 5–20 Uhr UTC: **jede Minute**
+* sonst: alle 5 Minuten
+
+Die Reaktionszeit hängt damit nicht mehr an GitHubs Warteschlange, sondern
+liegt bei rund einer Minute. Der Zustand wird während der Schleife nur in die
+Datei geschrieben; ins Repository zurück schreibt ihn der Workflow einmal am
+Jobende — sonst entstünden hunderte Commits am Tag.
+
+Für öffentliche Repositories rechnet GitHub keine Actions-Minuten ab, der
+Dauerbetrieb kostet also nichts. Die Taktweiten stehen als `TAKT_*` in
+`watch.py`; deutlich unter 60 Sekunden sollte man nicht gehen, sonst wird aus
+regem Interesse eine Belastung für die fremde Seite.
+
 ## Lokal ausprobieren
 
 ```bash

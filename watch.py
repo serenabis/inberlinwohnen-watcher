@@ -2,9 +2,10 @@
 """Beobachtet den Wohnungsfinder von inberlinwohnen.de und mailt neue Inserate.
 
 Aufruf:
-    python3 watch.py            # normaler Lauf
+    python3 watch.py            # ein Durchlauf
     python3 watch.py --dry-run  # nichts versenden, nichts speichern
     python3 watch.py --test-mail # Testmail verschicken und beenden
+    python3 watch.py --dauer 1680 # 28 Minuten lang im Takt weiterpruefen
 """
 
 import argparse
@@ -14,6 +15,7 @@ import os
 import smtplib
 import ssl
 import sys
+import time
 import urllib.parse
 from email.message import EmailMessage
 from email.utils import formatdate, make_msgid
@@ -32,6 +34,25 @@ FORGET_AFTER_DAYS = 90
 # Bei Stoerungen (Seite nicht erreichbar, Aufbau geaendert) hoechstens so oft
 # eine Warnmail - sonst kaeme bei einem laengeren Ausfall alle 5 Minuten eine.
 ERROR_MAIL_EVERY_HOURS = 12
+
+# Takt im Schleifenbetrieb (--dauer). Die Inserate werden von inberlinwohnen.de
+# minuetlich eingespielt, aber praktisch nur werktags zwischen 8 und 20 Uhr:
+# von 129 ausgewerteten Zeitstempeln lagen 2 am Wochenende. Deshalb tagsueber
+# jede Minute schauen und sonst deutlich seltener - das haelt die Last auf der
+# fremden Seite in dem Rahmen, den ein aufmerksamer Mensch auch erzeugt.
+TAKT_AKTIV_SEKUNDEN = 60
+TAKT_RUHE_SEKUNDEN = 300
+# In UTC, denn der GitHub-Runner laeuft in UTC: 05-20 Uhr UTC deckt die
+# Berliner Kernzeit im Sommer wie im Winter ab.
+AKTIV_STUNDEN_UTC = range(5, 21)
+
+
+def taktweite(stamp):
+    """Sekunden bis zur naechsten Pruefung."""
+    werktag = stamp.weekday() < 5
+    if werktag and stamp.hour in AKTIV_STUNDEN_UTC:
+        return TAKT_AKTIV_SEKUNDEN
+    return TAKT_RUHE_SEKUNDEN
 
 
 def now():
@@ -415,28 +436,7 @@ def report_error(state, message, dry_run):
     return True
 
 
-def main():
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--dry-run", action="store_true",
-                        help="nichts versenden und nichts speichern")
-    parser.add_argument("--test-mail", action="store_true",
-                        help="nur eine Testmail verschicken")
-    args = parser.parse_args()
-
-    if args.test_mail:
-        try:
-            to = send_mail(
-                "Wohnungs-Watcher: Testmail",
-                "Wenn du das liest, funktioniert der Mailversand.",
-                '<p style="font-family:sans-serif;">Wenn du das liest, funktioniert '
-                "der Mailversand.</p>",
-            )
-        except Exception as fehler:  # noqa: BLE001 - Ursache wird uebersetzt
-            print(diagnose(fehler), file=sys.stderr)
-            return 1
-        print("Testmail verschickt an: %s" % ", ".join(to))
-        return 0
-
+def durchlauf(args):
     load_env_file()
     config = load_json(CONFIG_PATH, {})
     # Der Suchfilter gehoert niemandem ausser dir: er kommt aus der Umgebung
@@ -552,6 +552,61 @@ def main():
     else:
         print("Zustand unveraendert.")
     return 0
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--dry-run", action="store_true",
+                        help="nichts versenden und nichts speichern")
+    parser.add_argument("--test-mail", action="store_true",
+                        help="nur eine Testmail verschicken")
+    parser.add_argument("--dauer", type=int, default=0, metavar="SEKUNDEN",
+                        help="so lange im Takt weiterpruefen statt einmal "
+                             "(z. B. 1680 fuer 28 Minuten)")
+    args = parser.parse_args()
+
+    if args.test_mail:
+        try:
+            to = send_mail(
+                "Wohnungs-Watcher: Testmail",
+                "Wenn du das liest, funktioniert der Mailversand.",
+                '<p style="font-family:sans-serif;">Wenn du das liest, funktioniert '
+                "der Mailversand.</p>",
+            )
+        except Exception as fehler:  # noqa: BLE001 - Ursache wird uebersetzt
+            print(diagnose(fehler), file=sys.stderr)
+            return 1
+        print("Testmail verschickt an: %s" % ", ".join(to))
+        return 0
+
+    if args.dauer <= 0:
+        return durchlauf(args)
+
+    # Schleifenbetrieb: GitHub haelt den 5-Minuten-Takt seiner geplanten Laeufe
+    # nicht ein - unter Last vergehen 10 bis 30 Minuten. Ein Job, der laenger
+    # laeuft und selbst im Takt nachschaut, ist deutlich puenktlicher. Der
+    # Zustand wird dabei nur in die Datei geschrieben; ins Repository
+    # zurueckgeschrieben wird er einmal am Jobende durch den Workflow.
+    schluss = time.monotonic() + args.dauer
+    runde = 0
+    while True:
+        runde += 1
+        print("--- Durchlauf %d (%s UTC)"
+              % (runde, now().strftime("%H:%M:%S")), flush=True)
+        try:
+            durchlauf(args)
+        except Exception as fehler:  # noqa: BLE001 - ein Aussetzer darf den
+            # laufenden Job nicht beenden, sonst schweigt der Waechter bis zum
+            # naechsten geplanten Start.
+            print("Durchlauf fehlgeschlagen: %s" % fehler, file=sys.stderr,
+                  flush=True)
+
+        pause = taktweite(now())
+        if time.monotonic() + pause >= schluss:
+            print("Zeitfenster ausgeschoepft nach %d Durchlaeufen." % runde,
+                  flush=True)
+            return 0
+        time.sleep(pause)
 
 
 if __name__ == "__main__":
