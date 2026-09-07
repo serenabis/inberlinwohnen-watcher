@@ -256,6 +256,9 @@ def item_text(item):
         if label == "Adresse" or not value:
             continue
         lines.append("  %s: %s" % (label, value))
+    if item.get("ortsteilUnklar"):
+        lines.append("  Achtung: Diese PLZ liegt auf einer Ortsteilgrenze - "
+                     "bitte pruefen, ob die Lage passt.")
     if item["company"]:
         lines.append("  Vermieterin: %s" % item["company"])
     if item["title"]:
@@ -285,8 +288,14 @@ def item_html(item):
         if label != "Adresse" and value
     )
     badge = ""
+    if item.get("ortsteilUnklar"):
+        badge += (
+            '<span style="background:#e0e7ff;color:#3730a3;border-radius:4px;'
+            'padding:1px 6px;font-size:12px;margin-left:8px;">Ortsteil pruefen'
+            '</span>'
+        )
     if item["hasWbs"]:
-        badge = (
+        badge += (
             '<span style="background:#fde68a;color:#78350f;border-radius:4px;'
             'padding:1px 6px;font-size:12px;margin-left:8px;">WBS</span>'
         )
@@ -474,6 +483,23 @@ def main():
         key=lambda item: item.get("createdAt") or "",
         reverse=True,
     )
+
+    # Ortsteil-Feinfilter: inberlinwohnen.de filtert nur nach Bezirk, die
+    # Wunschortsteile werden hier ueber die PLZ nachgezogen. Aussortierte
+    # Wohnungen gelten trotzdem als gesehen - sie sollen nicht bei jedem Lauf
+    # erneut geprueft werden.
+    vorher = len(new_items)
+    gefiltert = []
+    for item in new_items:
+        status = finder.ortsteil_status(item)
+        if status == "nein":
+            continue
+        item["ortsteilUnklar"] = status == "unklar"
+        gefiltert.append(item)
+    new_items = gefiltert
+    if vorher != len(new_items):
+        print("%d von %d neuen Wohnungen liegen ausserhalb der Wunschortsteile."
+              % (vorher - len(new_items), vorher))
 
     if seeding:
         # Beim ersten Lauf nicht den kompletten Bestand mailen.

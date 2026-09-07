@@ -181,31 +181,97 @@ def parse_page(page_html):
     return item_ids, items, search_params
 
 
+# --- Ortsteil-Feinfilter ---------------------------------------------------
+# inberlinwohnen.de kennt im Wohnungsfinder nur Bezirke, keine Ortsteile. Die
+# Wunschortsteile werden deshalb hier nachgelagert ueber die Postleitzahl
+# bestimmt. Fuer Mitte und Friedrichshain-Kreuzberg zaehlt der ganze Bezirk.
+BEZIRKE_KOMPLETT = {
+    "Mitte",
+    "Friedrichshain-Kreuzberg",
+}
+
+# PLZ, die eindeutig in einem gewuenschten Ortsteil liegen.
+ORTSTEIL_PLZ = {
+    # nur Ortsteil Neukoelln (nicht Britz, Buckow, Gropiusstadt, Rudow)
+    "Neukölln": {
+        "12043", "12045", "12047", "12049", "12051",
+        "12053", "12055", "12057", "12059",
+    },
+    # Prenzlauer Berg, Weissensee, Pankow
+    "Pankow": {
+        "10405", "10407", "10409", "10435", "10437", "10439",
+        "13086", "13088", "13187", "13189",
+    },
+    # Charlottenburg und Charlottenburg-Nord
+    "Charlottenburg-Wilmersdorf": {
+        "10553", "10585", "10587", "10589", "10623",
+        "10625", "10627", "10629", "13627", "13629",
+    },
+    # Schoeneberg und Tempelhof
+    "Tempelhof-Schöneberg": {
+        "10777", "10779", "10781", "10783", "10785", "10823",
+        "10825", "10827", "10829", "12099", "12101", "12103",
+    },
+    # Lichtenberg und Rummelsburg
+    "Lichtenberg": {"10365"},
+    # Alt-Treptow und Plaenterwald
+    "Treptow-Köpenick": {"12435"},
+}
+
+# PLZ, die sich einen gewuenschten und einen unerwuenschten Ortsteil teilen.
+# Solche Wohnungen werden gemeldet, aber in der Mail als unsicher markiert -
+# lieber ein Inserat zu viel pruefen als eines verpassen.
+ORTSTEIL_PLZ_UNKLAR = {
+    "Charlottenburg-Wilmersdorf": {"14059"},          # Charlottenburg / Westend
+    "Lichtenberg": {"10315", "10317", "10367", "10369"},
+    # Lichtenberg, Rummelsburg / Friedrichsfelde, Fennpfuhl
+    "Tempelhof-Schöneberg": {"12105", "12109"},       # Tempelhof / Mariendorf
+    "Treptow-Köpenick": {"12437"},                    # Plaenterwald / Baumschulenweg
+}
+
+
+def ortsteil_status(item):
+    """'ja', 'unklar' oder 'nein' - liegt die Wohnung im Wunschortsteil?"""
+    district = (item.get("district") or "").strip()
+    if district in BEZIRKE_KOMPLETT:
+        return "ja"
+    zip_code = (item.get("zipCode") or "").strip()
+    if zip_code in ORTSTEIL_PLZ.get(district, ()):
+        return "ja"
+    if zip_code in ORTSTEIL_PLZ_UNKLAR.get(district, ()):
+        return "unklar"
+    if not zip_code:
+        # Ohne PLZ laesst sich nichts entscheiden - lieber melden als verlieren.
+        return "unklar"
+    return "nein"
+
+
 # Sicherheitsnetz, falls der verschluesselte `q`-Token einmal ungueltig wird:
 # dieselben Kriterien lokal auf die ungefilterte Liste anwenden.
-FALLBACK_DISTRICTS = {
-    "Charlottenburg-Wilmersdorf",
-    "Friedrichshain-Kreuzberg",
-    "Lichtenberg",
-    "Mitte",
-    "Neukölln",
-    "Pankow",
-    "Tempelhof-Schöneberg",
-    "Treptow-Köpenick",
-}
-FALLBACK_MIN_ROOMS = 1.0
+FALLBACK_DISTRICTS = BEZIRKE_KOMPLETT | set(ORTSTEIL_PLZ)
+FALLBACK_MIN_ROOMS = 2.0
+FALLBACK_MAX_RENT_NET = 1400.0
+
+
+def _zahl(value):
+    """'1.234,56' -> 1234.56; None, wenn sich nichts lesen laesst."""
+    text = (value or "").strip().replace(".", "").replace(",", ".")
+    try:
+        return float(text)
+    except ValueError:
+        return None
 
 
 def matches_fallback_filter(item):
     if item.get("district") and item["district"] not in FALLBACK_DISTRICTS:
         return False
-    rooms = (item.get("rooms") or "").replace(",", ".")
-    try:
-        if float(rooms) < FALLBACK_MIN_ROOMS:
-            return False
-    except ValueError:
-        pass
-    return True
+    rooms = _zahl(item.get("rooms"))
+    if rooms is not None and rooms < FALLBACK_MIN_ROOMS:
+        return False
+    rent = _zahl(item.get("rentNet"))
+    if rent is not None and rent > FALLBACK_MAX_RENT_NET:
+        return False
+    return ortsteil_status(item) != "nein"
 
 
 def filter_is_active(search_params):
@@ -268,8 +334,8 @@ def collect_with_fallback(q):
     ordered = [i for i in all_ids if i in kept]
     note = (
         "Der gespeicherte Suchfilter (q-Parameter) wird von inberlinwohnen.de "
-        "nicht mehr akzeptiert. Es wurde ersatzweise lokal nach Bezirk und "
-        "Zimmerzahl gefiltert. Bitte einen neuen Link aus dem Wohnungsfinder "
-        "kopieren und in config.json eintragen."
+        "nicht mehr akzeptiert. Es wurde ersatzweise lokal nach Bezirk, "
+        "Ortsteil, Zimmerzahl und Kaltmiete gefiltert. Bitte einen neuen Link "
+        "aus dem Wohnungsfinder kopieren und als Secret FINDER_Q hinterlegen."
     )
     return ordered, kept, None, note

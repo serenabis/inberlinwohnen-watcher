@@ -83,19 +83,49 @@ sind es eher 5 bis 15 Minuten.
 ## Suchfilter ändern
 
 Auf inberlinwohnen.de die Kriterien im Wohnungsfinder einstellen, den Link aus
-der Adresszeile kopieren und alles hinter `?q=` als `q` in `config.json`
-eintragen (das abschließende `%3D` gehört dazu). Ändern, committen, pushen.
+der Adresszeile kopieren und alles zwischen `?q=` und `&page=` übernehmen (das
+abschließende `%3D` gehört dazu). Dieser Token gehört an **zwei** Stellen:
+
+* **GitHub → Settings → Secrets and variables → Actions → `FINDER_Q`** — das
+  ist die Stelle, die der 5-Minuten-Lauf tatsächlich benutzt.
+* `.env` auf dem eigenen Rechner — nur für lokale Testläufe.
 
 Der aktuell hinterlegte Filter:
 
 * **Bezirke:** Charlottenburg-Wilmersdorf, Friedrichshain-Kreuzberg,
   Lichtenberg, Mitte, Neukölln, Pankow, Tempelhof-Schöneberg, Treptow-Köpenick
-* **Zimmer:** ab 1
-* ergibt rund 199 von 274 Wohnungen
+* **Zimmer:** ab 2
+* **Kaltmiete:** bis 1400 €
+* ergibt rund 124 von 274 Wohnungen
+
+### Ortsteile
+
+Der Wohnungsfinder kennt nur Bezirke. Die feinere Eingrenzung auf Ortsteile
+passiert deshalb im Watcher selbst, anhand der Postleitzahl
+(`ORTSTEIL_PLZ` in `finder.py`):
+
+| Bezirk | gewünschte Ortsteile |
+| --- | --- |
+| Mitte | alle |
+| Friedrichshain-Kreuzberg | alle |
+| Neukölln | nur Neukölln (ohne Britz, Buckow, Gropiusstadt, Rudow) |
+| Pankow | Prenzlauer Berg, Weißensee, Pankow |
+| Lichtenberg | Lichtenberg, Rummelsburg |
+| Treptow-Köpenick | Alt-Treptow, Plänterwald |
+| Tempelhof-Schöneberg | Schöneberg, Tempelhof |
+| Charlottenburg-Wilmersdorf | Charlottenburg, Charlottenburg-Nord |
+
+Von den 124 Treffern des Bezirksfilters bleiben so rund 18 übrig.
+
+Einige Postleitzahlen liegen auf einer Ortsteilgrenze und lassen sich nicht
+eindeutig zuordnen (etwa 10367: Lichtenberg *und* Fennpfuhl). Solche Wohnungen
+werden **gemeldet** und in der Mail mit „Ortsteil prüfen" markiert — lieber ein
+Inserat zu viel ansehen als eines verpassen. Sie stehen in
+`ORTSTEIL_PLZ_UNKLAR`.
 
 Sollte der Token einmal ungültig werden, schaltet der Watcher automatisch auf
-lokale Filterung nach denselben Kriterien um (`FALLBACK_DISTRICTS` in
-`finder.py`) und weist in der Mail darauf hin.
+lokale Filterung nach denselben Kriterien um (Bezirk, Ortsteil, Zimmerzahl,
+Kaltmiete — `FALLBACK_*` in `finder.py`) und weist in der Mail darauf hin.
 
 ## Lokal ausprobieren
 
