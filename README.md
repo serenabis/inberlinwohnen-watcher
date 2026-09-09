@@ -160,6 +160,8 @@ regem Interesse eine Belastung für die fremde Seite.
 python3 watch.py --dry-run    # zeigt die Mail an, verschickt und speichert nichts
 
 export SMTP_HOST=smtp.web.de SMTP_USER=... SMTP_PASS=... MAIL_TO=...
+python3 test_zugang.py        # Zugangsdaten pruefen (fragt das Passwort ab)
+python3 test_zugang.py --aus-env  # dasselbe mit den Werten aus .env
 python3 watch.py --test-mail  # nur eine Testmail
 python3 watch.py              # echter Lauf
 ```
@@ -169,6 +171,7 @@ python3 watch.py              # echter Lauf
 | Datei                            | Zweck                                              |
 |----------------------------------|----------------------------------------------------|
 | `finder.py`                      | Abruf und Auswertung des Wohnungsfinders            |
+| `test_zugang.py`                 | prueft Zugangsdaten mit einem Anmeldeversuch        |
 | `watch.py`                       | Abgleich mit dem Stand, Mailversand                 |
 | `config.json`                    | Suchfilter (`q`)                                    |
 | `state/seen.json`                | bereits gemeldete Wohnungen                         |
@@ -177,6 +180,11 @@ python3 watch.py              # echter Lauf
 `state/seen.json` wird vom Workflow nach jedem Lauf ins Repository
 zurückgeschrieben. Das ist zugleich praktisch, weil regelmäßige Commits
 verhindern, dass GitHub den Zeitplan nach 60 Tagen Inaktivität abschaltet.
+
+Schlägt der **Mailversand** fehl, bricht der Lauf sofort ab und der Job wird
+**rot**. Vorher verschluckte die Schleife solche Fehler und meldete trotzdem
+Erfolg – ein abgelehntes Passwort blieb damit unbemerkt, während der Watcher
+still keine einzige Wohnung meldete.
 
 Einträge, die 90 Tage nicht mehr in den Treffern auftauchten, werden vergessen –
 die Datei wächst also nicht unbegrenzt. Bei Störungen (Seite nicht erreichbar,
